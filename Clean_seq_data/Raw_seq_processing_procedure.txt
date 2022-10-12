@@ -1,0 +1,89 @@
+Readme Jun2
+
+1. Trim reads and throw out any pair where one of the reads less than 100 bp long
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool10_R1_trim.fastq.gz -p pool10_R2_trim.fastq.gz ../../raw_pooled_fastq/pool10Tcruzi_25_ACTGAT_S2_L001_R1_001.fastq.gz ../../raw_pooled_fastq/pool10Tcruzi_25_ACTGAT_S2_L001_R2_001.fastq.gz  --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool1_R1_trim.fastq.gz -p pool1_R2_trim.fastq.gz ../../raw_pooled_fastq/pool1Tcruzi_11_TAGCTT_S5_L001_R1_001.fastq.gz  ../../raw_pooled_fastq/pool1Tcruzi_11_TAGCTT_S5_L001_R2_001.fastq.gz --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool2_R1_trim.fastq.gz -p pool2_R2_trim.fastq.gz ../../raw_pooled_fastq/pool2Tcruzi_12_GGCTAC_S6_L001_R1_001.fastq.gz ../../raw_pooled_fastq/pool2Tcruzi_12_GGCTAC_S6_L001_R2_001.fastq.gz  --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool3_R1_trim.fastq.gz -p pool3_R2_trim.fastq.gz ../../raw_pooled_fastq/pool3Tcruzi_13_AGTCAA_S7_L001_R1_001.fastq.gz ../../raw_pooled_fastq/pool3Tcruzi_13_AGTCAA_S7_L001_R2_001.fastq.gz  --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool4_R1_trim.fastq.gz -p pool4_R2_trim.fastq.gz ../../raw_pooled_fastq/pool4Tcruzi_14_AGTTCC_S8_L001_R1_001.fastq.gz. ./../raw_pooled_fastq/pool4Tcruzi_14_AGTTCC_S8_L001_R2_001.fastq.gz --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool5_R1_trim.fastq.gz -p pool5_R2_trim.fastq.gz ../../raw_pooled_fastq/pool5Tcruzi_15_ATGTCA_S9_L001_R1_001.fastq.gz ../../raw_pooled_fastq/pool5Tcruzi_15_ATGTCA_S9_L001_R2_001.fastq.gz  --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool6_R1_trim.fastq.gz -p pool6_R2_trim.fastq.gz ../../raw_pooled_fastq/pool6Tcruzi_16_CCGTCC_S10_L001_R1_001.fastq.gz ../../raw_pooled_fastq/pool6Tcruzi_16_CCGTCC_S10_L001_R2_001.fastq.gz  --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool7_R1_trim.fastq.gz -p pool7_R2_trim.fastq.gz ../../raw_pooled_fastq/pool7Tcruzi_17_GTAGAG_S11_L001_R1_001.fastq.gz ../../raw_pooled_fastq/pool7Tcruzi_17_GTAGAG_S11_L001_R2_001.fastq.gz  --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool8_R1_trim.fastq.gz -p pool8_R2_trim.fastq.gz ../../raw_pooled_fastq/pool8Tcruzi_18_GTCCGC_S12_L001_R1_001.fastq.gz ../../raw_pooled_fastq/pool8Tcruzi_18_GTCCGC_S12_L001_R2_001.fastq.gz  --minimum-length 100:100 -n 2 --cores=3
+
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o pool9_R1_trim.fastq.gz -p pool9_R2_trim.fastq.gz ../../raw_pooled_fastq/pool9Tcruzi_19_GTGAAA_S13_L001_R1_001.fastq.gz ../../raw_pooled_fastq/pool9Tcruzi_19_GTGAAA_S13_L001_R2_001.fastq.gz  --minimum-length 100:100 -n 2 --cores=3
+
+
+2. Demultiplex by R1, giving it the barcode metadata that has all the barcodes, forward and reverse. Make sure the reads are paired!
+
+(
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool1_R1_trim.fastq.gz ../adaptor_trimmed/pool1_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool2_R1_trim.fastq.gz ../adaptor_trimmed/pool2_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool3_R1_trim.fastq.gz ../adaptor_trimmed/pool3_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool4_R1_trim.fastq.gz ../adaptor_trimmed/pool4_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool5_R1_trim.fastq.gz ../adaptor_trimmed/pool5_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool6_R1_trim.fastq.gz ../adaptor_trimmed/pool6_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool7_R1_trim.fastq.gz ../adaptor_trimmed/pool7_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool8_R1_trim.fastq.gz ../adaptor_trimmed/pool8_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool9_R1_trim.fastq.gz ../adaptor_trimmed/pool9_R2_trim.fastq.gz
+demultiplex match -f MID_to_Barcodes_fw.tsv ../adaptor_trimmed/pool10_R1_trim.fastq.gz ../adaptor_trimmed/pool10_R2_trim.fastq.gz
+)
+
+(
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool1_R1_trim.fastq.gz ../adaptor_trimmed/pool1_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool2_R1_trim.fastq.gz ../adaptor_trimmed/pool2_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool3_R1_trim.fastq.gz ../adaptor_trimmed/pool3_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool4_R1_trim.fastq.gz ../adaptor_trimmed/pool4_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool5_R1_trim.fastq.gz ../adaptor_trimmed/pool5_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool6_R1_trim.fastq.gz ../adaptor_trimmed/pool6_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool7_R1_trim.fastq.gz ../adaptor_trimmed/pool7_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool8_R1_trim.fastq.gz ../adaptor_trimmed/pool8_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool9_R1_trim.fastq.gz ../adaptor_trimmed/pool9_R2_trim.fastq.gz
+demultiplex demux -r -e 10 MID_to_Barcodes_fw_rvcomp.tsv ../adaptor_trimmed/pool10_R1_trim.fastq.gz ../adaptor_trimmed/pool10_R2_trim.fastq.gz
+)
+
+Concatenated using Concat.py
+
+3. Rename them using the next python script: rename_files.py
+
+4. Seperate the flipped reads into different files (not reverse complimenting the flipped reads this time)
+
+# Cat all the fastas of one direction together
+cat ../correct/*R1.fastq.gz > ./all_R1.fastq.gz
+
+seqkit fq2fa all_R1.fastq.gz -o all_R1.fasta.gz
+
+gunzip all_R1.fasta.gz
+
+# blast for the amplicon
+
+makeblastdb -dbtype nucl -in amplicon.fasta -out amplicon
+
+blastn -query all_R1.fasta -db ./amplicon_blastdb/amplicon -outfmt "6 qseqid sseqid pident evalue length sstrand qstart qend sstart send" > blast_R1.out
+
+# run the python script: read_direction_R1R2_seperatefiles.py - this will seperate the flipped and nonflipped amplicons, and put them in the right R1 and R2 file, but won't reverse compliment the flipped ones. So the R1 and R2 are the reverse and forward reads, but the fw and rv are for the sense and antisense strands of the amplicon
+
+# remove the unzipped files
+
+# zip the output files
+
+5. Remove barcodes and also amplicon primer
+
+	use primer trim.py that has a seperate set of primers it looks for based on the fw or rv file
+
+run the script that basically is a loop for all samples
+
+4. Read into different dada2 files for forwardand reverse
+	trunc length
+
+5. Do analyisis in Haplotype_analysis r markdown
+
