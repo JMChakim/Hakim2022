@@ -1,0 +1,894 @@
+---
+title: "Haplotype analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(plotly)
+library(cowplot)
+library(vegan)
+library(UpSetR)
+library(ggpubr)
+library(ggplot2); theme_set(theme_bw()); theme_update(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+sample.colors = c(`mother` = "#E2BD4D"  , `0m`= "#27A4C3" , `1m`= "#004D40",`3m`="#E25D8D", `9m`="#7152A4")
+
+group.colors <- c(`Haplotype_0` = "#7BCEC8", 
+                  `Haplotype_1` = "#FF9896", 
+                  `Haplotype_2` ="#B4E877", 
+                  `Haplotype_3` = "#FFDC73",
+                  `Haplotype_4` = "#5DA069",
+                  `Haplotype_5` = "#6291EA",
+                  `Haplotype_6` = "#C5B0D5",
+                  `Haplotype_7` = "#C49C94", 
+                  `Haplotype_8` = "#D46A97", 
+                  `Haplotype_9` ="#FFB14D", 
+                  `Haplotype_10` = "#DE9ED6",
+                  `Haplotype_11` = "#6B6ECF")
+
+
+```
+
+
+Read in seqtab, output from dada2 script
+```{r}
+#read in seqtab and do some pruning 
+
+#forward
+seqtab.nochim_fw = read.csv("../dada2/out/seqtab_nochim_fw.csv")
+
+#remove ASV with population freq lower than .1%
+# find sum of the matrix
+Matrix_sum = seqtab.nochim_fw[,2:ncol(seqtab.nochim_fw)] %>% 
+  sum()
+# Find the number of reads that would be less that 1% across population
+cutoff_reads = Matrix_sum * 0.001
+
+seqtab_prune_fw = seqtab.nochim_fw %>% as.data.frame() %>% 
+  select_if(negate(function(col) is.numeric(col) && sum(col) < cutoff_reads)) %>% 
+  rename(sample  = `X`) 
+
+seqtab_prune_fw %>% dim()
+seqtab.nochim_fw %>% dim
+
+seqtab.nochim_fw %>% 
+  column_to_rownames("X") %>% 
+  pivot_longer(names_to = "seq", values_to = "read", cols =everything()) %>% 
+  ggplot()+geom_histogram(aes(x=read))+scale_x_log10() +geom_vline(xintercept = cutoff_reads)
+
+#write.csv(seqtab_prune, "../dada2/out/seqtab_prune_fw.csv", row.names = F)
+#seqtab_prune = read.csv("../dada2/out/seqtab_prune_fw.csv") 
+
+
+seqtab.nochim_rv = read.csv("../dada2/out/seqtab_nochim_rv.csv")
+
+#remove ASV with population freq lower than .1%
+# find sum of the matrix
+Matrix_sum = seqtab.nochim_rv[,2:ncol(seqtab.nochim_rv)] %>% 
+  sum()
+# Find the number of reads that would be less that 1% across population
+cutoff_reads = Matrix_sum * 0.001
+
+seqtab_prune_rv = seqtab.nochim_rv %>% as.data.frame() %>% 
+  select_if(negate(function(col) is.numeric(col) && sum(col) < cutoff_reads)) %>% 
+  rename(sample  = `X`) 
+
+seqtab_prune_rv %>% dim()
+seqtab.nochim_rv %>% dim
+
+
+seqtab.nochim_rv %>% 
+  column_to_rownames("X") %>% 
+  pivot_longer(names_to = "seq", values_to = "read", cols =everything()) %>% 
+  ggplot()+geom_histogram(aes(x=read))+scale_x_log10()+geom_vline(xintercept = cutoff_reads)
+
+```
+
+# Generate long dataformats
+```{r}
+
+seqtab_work_fw = seqtab_prune_fw %>% 
+  pivot_longer(cols = -sample, names_to = "seq", values_to = "freq")
+seqtab_work_rv = seqtab_prune_rv %>% 
+  pivot_longer(cols = -sample, names_to = "seq", values_to = "freq")
+
+
+#merge fw and rv by ASV
+seqtab_work = full_join(seqtab_work_fw, seqtab_work_rv, by = c("seq", "freq", "sample") ) %>% 
+  mutate(source =ifelse(str_detect(sample, "fw"), "fw","rv")) %>% 
+  mutate(samples_merged = substring(sample, 1, nchar(sample) -2 )) %>% 
+  mutate(MID = str_extract(sample, "(?<=MID_)[:digit:]")) 
+
+
+```
+
+
+
+# Output sequences 
+```{r eval=FALSE, include=FALSE}
+#output the sequences to do some clustering 
+k = 0
+for (i in (seqtab_work_fw$seq %>% unique())) {
+    cat(">", "Putative_Haplotype_", k, "\n", i, "\n") 
+    k = k + 1
+} 
+
+```
+
+MANUALLY CHANGED hap 6 to hap 12
+
+
+# Make seqtab annotadated
+```{r}
+seqtab_annotated = seqtab_cluster %>% 
+  group_by(samples_merged, seq) %>% 
+  mutate(merged_freq = sum(freq)) %>%
+  filter(merged_freq!=0) %>% 
+  select(-source, -sample, -freq) %>%
+  unique() %>% 
+  ungroup() %>% 
+  mutate(mother = ifelse(str_detect(samples_merged, "mother"), "mother", "child")) %>% 
+  mutate(samples_merged = case_when(samples_merged == "35_11m_MID_1" ~ "035_11m_MID_1",
+                            samples_merged == "35_11m_MID_2" ~ "035_11m_MID_2",
+                            samples_merged == "35_9m_MID_1"~"035_9m_MID_1", 
+                            samples_merged == "35_9m_MID_2"~"035_9m_MID_2",
+                            TRUE ~samples_merged
+                            )) %>% 
+  mutate(sample_type = str_extract(samples_merged, "[:alnum:]{2,6}(?=_MID)")) %>% 
+  mutate(family = str_extract(samples_merged, ".{3,4}(?=_)")) %>% 
+  mutate(MID = str_extract(samples_merged, "(?<=MID_)[:digit:]")) %>% 
+  mutate(sample_single = str_extract(samples_merged, ".{4,11}(?=_MID_)")) %>% 
+  group_by(samples_merged) %>% 
+  mutate(total_reads = sum(merged_freq)) %>% 
+  group_by(community_cluster,samples_merged) %>% 
+  mutate(cluster_freq = sum(merged_freq)) %>% 
+  ungroup()
+
+
+#write.csv(seqtab_annotated, "../dada2/out/seqtab_annotated.csv", row.names = F)
+
+seqtab_annotated = read.csv("../dada2/out/seqtab_annotated.csv") %>% 
+  mutate(seq_id = ifelse(seq_id == "Haplotype_12", "Haplotype_0", seq_id)) %>% 
+  select(-community_cluster, -cluster_freq, -seq) %>% 
+  group_by(seq_id, samples_merged) %>% mutate(merged_freq = sum(merged_freq)) %>% ungroup() %>% unique() %>% 
+  mutate(family =as.character(ifelse(family == "35", "035", family))) %>% 
+  mutate(sample_type = ordered(sample_type, 
+                           levels = c("mother", "0m", "1m","3m","9m"))) %>% 
+  mutate(family = ordered(family, 
+                          levels =c("117", "4296", "4825", #twins
+                                    "4285","3482","3236","2134","4186", #have mom, two reps
+                                    "1244","1507","2315","2619","2596", #have mom, one rep
+                                    "3656","1559","035","500","2838","3048","3103","3565", #No mom, two reps/timepoints
+                                    "869","181","327") )) %>% 
+  ungroup()
+```
+
+
+
+# How abundant is each ASV in the whole population
+```{r}
+seqtab_annotated %>% 
+  group_by(seq_id) %>% 
+  summarise(seq_id_freq = sum(merged_freq)) %>% 
+  ggplot(aes(x = seq_id, y = seq_id_freq)) +
+  geom_col() +
+  geom_text(aes(label = seq_id_freq), vjust = -.35)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+```
+
+
+
+# Ascertaining the cutoff of total reads > 200 for sample inclusion
+Compare read depth for each sample to shannons diversity and total number of haplotypes recovered
+```{r}
+
+# Using Shannon
+
+seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  pivot_wider(id_cols = c(samples_merged), names_from =  seq_id, values_from = merged_freq, values_fn =  sum ) %>% 
+  replace(is.na(.), 0) %>% 
+  column_to_rownames("samples_merged") %>% 
+  diversity(index= "shannon") %>% 
+  as.matrix() %>% as.data.frame() %>% 
+  rownames_to_column("samples_merged") %>% rename(shannon = V1) %>% 
+  mutate(sample_type = str_extract(samples_merged, "[:alnum:]{2,6}(?=_MID)")) %>% 
+  mutate(family = str_extract(samples_merged, ".{3,4}(?=_)")) %>% 
+  mutate(MID = str_extract(samples_merged, "(?<=MID_)[:digit:]")) %>% 
+    mutate(sample_single = str_extract(samples_merged, ".{4,11}(?=_MID_)")) %>% 
+  group_by(sample_single) %>% 
+  mutate(mean_shannon = (mean(shannon))) %>% 
+  left_join(seqtab_annotated %>% select(samples_merged, total_reads), by = "samples_merged") %>% 
+  ggplot(aes(y = shannon, x = total_reads,color = sample_type))+
+  scale_color_manual(values = sample.colors)+
+  scale_x_log10()+
+  ylab("Shannon") +xlab("Total Sample Reads")+
+  geom_point( size = 3) 
+
+
+
+#Using raw number of ASVs
+seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  ungroup() %>% 
+  group_by(samples_merged) %>% 
+  mutate(num_haplotypes = n()) %>% 
+  ggplot(aes(x=total_reads, y= num_haplotypes,color = sample_type )) +
+  scale_color_manual(values = sample.colors)+
+  geom_point(aes( text= samples_merged), size = 3) +
+  ylab("Number of Haplotypes") +xlab("Total Sample Reads")+
+  scale_x_log10() 
+
+## calc correlations
+## overall
+temp = seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  ungroup() %>% 
+  group_by(samples_merged) %>% 
+  mutate(num_haplotypes = n()) 
+
+cor.test(temp$num_haplotypes, temp$total_reads, method = "spearman")
+# moms
+temp1 = temp %>% filter(sample_type == "mother")
+cor.test(temp1$num_haplotypes, temp1$total_reads, method = "spearman")
+
+#0m
+temp1 = temp %>% filter(sample_type == "0m")
+cor.test(temp1$num_haplotypes, temp1$total_reads, method = "spearman")
+
+
+#overall
+temp = seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  pivot_wider(id_cols = c(samples_merged), names_from =  seq_id, values_from = merged_freq, values_fn =  sum ) %>% 
+  replace(is.na(.), 0) %>% 
+  column_to_rownames("samples_merged") %>% 
+  diversity(index= "shannon") %>% 
+  as.matrix() %>% as.data.frame() %>% 
+  rownames_to_column("samples_merged") %>% rename(shannon = V1) %>% 
+  mutate(sample_type = str_extract(samples_merged, "[:alnum:]{2,6}(?=_MID)")) %>% 
+  mutate(family = str_extract(samples_merged, ".{3,4}(?=_)")) %>% 
+  mutate(sample_single = str_extract(samples_merged, ".{4,11}(?=_MID_)")) %>% 
+  group_by(sample_single) %>% 
+  mutate(mean_shannon = (mean(shannon))) %>% 
+  left_join(seqtab_annotated %>% select(samples_merged, total_reads), by = "samples_merged") 
+
+cor.test(temp$mean_shannon, temp$total_reads, method = "spearman")
+```
+
+
+# Make family plots 
+stacked bar charts, normalized and not normalized, describing haplotype composition for each sample, grouped by family.
+
+```{r}
+Makeplot <- function(fam){
+    seqtab_annotated %>% 
+    filter(total_reads>200) %>% 
+    filter(family == fam) %>% 
+    ggplot()+
+    scale_fill_manual(values = group.colors)+
+    geom_col(aes(x = merged_freq, y = samples_merged, fill = seq_id),color = "black") +
+    theme(legend.position = "none")+
+    facet_wrap(~family) 
+}
+pdf("../Amplicon_analysis/Figures/ASV_byfam.pdf", height = 20, width = 24)
+plot_grid(Makeplot("035"), 
+          Makeplot("117"),
+          Makeplot("181"),
+          Makeplot("1244"),
+          Makeplot("1507"),
+          Makeplot("1559"),
+          Makeplot("2134"),
+          Makeplot("2315"),
+          Makeplot("2596"),
+          Makeplot("2619"),
+          Makeplot("2838"),
+          #Makeplot("2898"),
+          Makeplot("3048"),
+          Makeplot("3103"),
+          Makeplot("3236"),
+          Makeplot("327"),
+          Makeplot("3482"),
+          Makeplot("3565"),
+          Makeplot("3656"),
+          Makeplot("4186"),
+          Makeplot("4285"),
+          Makeplot("4296"),
+          #Makeplot("4533"),
+          #Makeplot("4635"),
+          #Makeplot("4930"),
+          Makeplot("500"),
+          Makeplot("869")
+          )
+dev.off()
+
+Makeplot <- function(fam){
+    seqtab_annotated %>% 
+    filter(total_reads>200) %>% 
+    filter(family == fam) %>% 
+    ggplot()+
+    geom_bar(aes(x = merged_freq, y = samples_merged, fill = seq_id),color = "black", position = "fill", stat = "identity") +
+    scale_fill_manual(values = group.colors)+
+    theme(legend.position = "none")+
+    facet_wrap(~family) 
+}
+
+pdf("../Amplicon_analysis/Figures/ASV_byfam_read_norm.pdf", height = 20, width = 24)
+plot_grid(Makeplot("035"), 
+          Makeplot("117"),
+          Makeplot("181"),
+          Makeplot("1244"),
+          Makeplot("1507"),
+          Makeplot("1559"),
+          Makeplot("2134"),
+          Makeplot("2315"),
+          Makeplot("2596"),
+          Makeplot("2619"),
+          Makeplot("2838"),
+          #Makeplot("2898"),
+          Makeplot("3048"),
+          Makeplot("3103"),
+          Makeplot("3236"),
+          Makeplot("327"),
+          Makeplot("3482"),
+          Makeplot("3565"),
+          Makeplot("3656"),
+          Makeplot("4186"),
+          Makeplot("4285"),
+          Makeplot("4296"),
+          #Makeplot("4533"),
+          #Makeplot("4635"),
+          #Makeplot("4930"),
+          Makeplot("500"),
+          Makeplot("869")
+          )
+dev.off()
+```
+
+Generate induvidual plots highlighted in main figure 3
+```{r}
+seqtab_annotated %>% 
+    filter(total_reads>200) %>% 
+    filter(family == "4296") %>% 
+    ggplot()+
+    geom_bar(aes(x = merged_freq, y = samples_merged, fill = seq_id),color = "black", position = "fill", stat = "identity") +
+    scale_fill_manual(values = group.colors)+
+    xlab("Normalized Reads")+
+    facet_wrap(~family) 
+
+seqtab_annotated %>% 
+    filter(total_reads>200) %>% 
+    filter(family == "1507") %>% 
+    ggplot()+
+    geom_bar(aes(x = merged_freq, y = samples_merged, fill = seq_id),color = "black", position = "fill", stat = "identity") +
+    scale_fill_manual(values = group.colors)+
+    xlab("Normalized Reads")+
+    facet_wrap(~family) 
+
+seqtab_annotated %>% 
+    filter(total_reads>200) %>% 
+    filter(family == "2619") %>% 
+    ggplot()+
+    geom_bar(aes(x = merged_freq, y = samples_merged, fill = seq_id),color = "black", position = "fill", stat = "identity") +
+    scale_fill_manual(values = group.colors)+
+    xlab("Normalized Reads")+
+    facet_wrap(~family) 
+
+seqtab_annotated %>% 
+    filter(total_reads>200) %>% 
+    filter(family == "3236") %>% 
+    ggplot()+
+    geom_bar(aes(x = merged_freq, y = samples_merged, fill = seq_id),color = "black", position = "fill", stat = "identity") +
+    scale_fill_manual(values = group.colors)+
+    xlab("Normalized Reads")+
+    facet_wrap(~family) 
+```
+
+
+# Haplotype frequency heatmap 
+supplemental figure 1
+```{r}
+cal_z_score <- function(x){
+  (x - mean(x)) / sd(x)
+}
+
+
+#Annotation information
+
+#make num of haplotypes
+test = seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  select(samples_merged, seq_id) %>% 
+  group_by(samples_merged) %>% 
+  mutate(num_haps = n()) %>% 
+  left_join(seqtab_annotated, by = c("samples_merged", "seq_id")) 
+
+annotation = data.frame(samples_merged = test$samples_merged,
+                        #family = seqtab_annotated$family,
+                        #replicate = as.character(test$MID),
+                        number_haps = test$num_haps,
+                        sample_type = test$sample_type
+                        ) 
+
+annotation = annotation  %>% 
+  unique() %>%
+  remove_rownames() %>% 
+  column_to_rownames(var = "samples_merged")
+
+## Raw ASV
+seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  filter(sample_type !=4186) %>% 
+  group_by(samples_merged) %>% 
+  mutate(reads_per_sample = sum(merged_freq)) %>% 
+  mutate(psuedocount = ifelse(merged_freq==0, 1, merged_freq)) %>% 
+  mutate(norm_reads = psuedocount/reads_per_sample) %>% 
+  na.omit() %>% 
+  group_by(seq_id, samples_merged) %>% 
+  mutate(asv_freq_sum = sum(norm_reads)) %>% 
+  arrange(family, sample_type) %>% 
+  select(asv_freq_sum, samples_merged, seq_id) %>% unique() %>% na.omit() %>% 
+  pivot_wider(id_cols = c("samples_merged","family", "sample_type"), names_from =seq_id , values_from = asv_freq_sum) %>% view
+  select(-family, -sample_type) %>% 
+  column_to_rownames("samples_merged") ->test 
+
+test[is.na(test)] <- 0
+
+test %>% 
+  na.omit() %>% 
+  pheatmap::pheatmap(
+                    color = colorRampPalette(c( "white", "navy"))(40),
+                    cluster_rows = F,
+                    annotation_row = annotation,
+                    border_color = "black",
+                    annotation_colors = list(sample_type = 
+                                             c(`mother` = "#E2BD4D"  , `0m`= "#27A4C3" , `1m`= "#004D40",`3m`="#E25D8D", `9m`="#7152A4"))
+              )->p
+
+pdf("../Amplicon_analysis/Figures/heatmapfrequency_ASV_readnorm.pdf", height = 16, width = 10)
+p
+dev.off()
+
+## Raw ASV binary
+
+seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  filter(sample_type !=4186) %>% 
+  na.omit() %>% 
+  group_by(seq_id, samples_merged) %>% 
+  #select(merged_freq, samples_merged, seq_id) %>% unique() %>% na.omit() %>% 
+  pivot_wider(id_cols = samples_merged, names_from =seq_id , values_from = merged_freq, values_fn = sum) %>%#fix values fn once u fixed 035
+  pivot_longer(cols = -samples_merged, names_to = "seq_id", values_to = "merged_freq") %>% 
+  mutate(hap_bin = ifelse(merged_freq !=0, 1, 0)) %>% 
+  mutate(sample_type = str_extract(samples_merged, "[:alnum:]{2,6}(?=_MID)")) %>% 
+  mutate(family = str_extract(samples_merged, ".{3,4}(?=_)")) %>% 
+  pivot_wider(id_cols = c("samples_merged","family","sample_type"), names_from = seq_id, values_from = hap_bin) %>% 
+  mutate(sample_type = ordered(sample_type, 
+                           levels = c("mother", "0m", "1m","3m","9m"))) %>% 
+  mutate(family = ordered(family, 
+                          levels =c("117", "4296", "4825", #twins
+                                    "4285","3482","3236","2134","4186", #have mom, two reps
+                                    "1244","1507","2315","2619","2596", #have mom, one rep
+                                    "3656","1559","035","500","2838","3048","3103","3565", #No mom, two reps/timepoints
+                                    "869","181","327") )) %>% 
+  arrange(family, sample_type) %>% select(-family,-sample_type) %>% 
+  column_to_rownames("samples_merged") ->test 
+
+test[is.na(test)] <- 0
+
+test %>% 
+  na.omit() %>% 
+  pheatmap::pheatmap(
+                    color = colorRampPalette(c( "white", "navy"))(10),
+                    cluster_rows = F,
+                    annotation_row = annotation,
+                    border_color = "black",
+                    annotation_colors = list(sample_type = 
+                                             c(`mother` = "#E2BD4D"  , `0m`= "#27A4C3" , `1m`= "#004D40",`3m`="#E25D8D", `9m`="#7152A4"))
+              )->p
+
+
+pdf("../Amplicon_analysis/Figures/heatmapfrequency_ASV_readnorm_binary.pdf", height = 16, width = 10)
+p
+dev.off()
+
+
+```
+
+
+# Shannons in baby at 0 months vs mom
+figure 3a
+```{r}
+##ggpubr
+
+
+#All of them
+ggviolin(test %>%
+              select(sample_type,mean_shannon, sample_single) %>% unique(),
+            x = "sample_type", y = "mean_shannon", fill = "sample_type",alpha = 0.7,
+            desc_stat = "mean_ci", color = "black", palette = sample.colors, trim = T,
+            add = c("jitter"), add.params = list(fill = "sample_type", alpha = 0.7) , xlab = "Sample Type", ylab = "Mean Shannon"
+            )+
+  stat_compare_means(comparisons = my_comparisons,
+                     label = "p.signif",
+                     method = "wilcox.test")
+my_comparisons <- list( c("mother", "0m"))
+
+ggviolin(test %>% filter(sample_type %in% c("0m", "mother")),
+            x = "sample_type", y = "mean_shannon", fill = "sample_type",alpha = 0.7,
+            desc_stat = "mean_ci", color = "black", palette = sample.colors, trim = T,
+            add = c("jitter"), add.params = list(fill = "sample_type", alpha = 0.7) 
+            )+
+  stat_compare_means(comparisons = my_comparisons, 
+                     label = "p.signif", 
+                     method = "wilcox.test")
+
+
+```
+
+
+# Sequence differences: ASVs
+figure 1a
+```{r}
+#Read in matrix from geneious
+
+pdf("../Amplicon_analysis/Figures/heatmap_PID.pdf", height = 7, width = 8)
+read.csv("../Amplicon_analysis/sequences/Distance_PID_ASV.csv") %>% 
+  column_to_rownames("X") %>% 
+  pheatmap::pheatmap(display_numbers = T)
+dev.off()
+
+p
+
+```
+
+
+
+# generate dataframes that will be used for figures that require "counting" of haplotypes
+```{r}
+both_samples = seqtab_annotated %>% 
+  pivot_wider(id_cols = c("sample_single", "seq_id"), names_from = MID, values_from = merged_freq, values_fn = sum, values_fill = 0) %>% 
+  mutate(has_hap_both = ifelse(`1` !=0 & `2` !=0, TRUE, FALSE)) %>% 
+  mutate(has_hap_either = ifelse (`1` !=0 | `2` !=0, TRUE, FALSE) ) %>% 
+  pivot_longer(cols = c(`1`,`2`), names_to = "MID", values_to = "merged_freq") %>% 
+  mutate(MID = as.integer(MID)) %>% 
+  left_join(seqtab_annotated, by = c("sample_single", "MID", "merged_freq", "seq_id")) %>% 
+  filter(has_hap_both ==TRUE)
+
+
+both_norep = seqtab_annotated %>% 
+  filter(total_reads>200)  %>% 
+  ungroup() %>% group_by(sample_single, seq_id) %>% 
+  mutate(sum_mid = sum(MID)) %>%
+  mutate(has_rep = ifelse(sum_mid %in% c("1","2"), "FALSE", "TRUE")) %>% 
+  pivot_wider(id_cols = c("sample_single", "seq_id", "has_rep"), names_from = MID, values_from = merged_freq, values_fn = sum, values_fill = 0) %>% 
+  mutate(has_hap_both = ifelse(`1` !=0 & `2` !=0, TRUE, FALSE)) %>% 
+  mutate(has_hap_either = ifelse (`1` !=0 | `2` !=0, TRUE, FALSE) ) %>% 
+  pivot_longer(cols = c(`1`,`2`), names_to = "MID", values_to = "merged_freq") %>% 
+  mutate(MID = as.integer(MID)) %>% 
+  left_join(seqtab_annotated, by = c("sample_single", "MID", "merged_freq", "seq_id")) %>% 
+  filter(has_hap_both ==TRUE | has_rep == FALSE )
+
+
+```
+
+# how many haplotypes per sample
+```{r}
+#How many total samples
+seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  select(sample_single) %>% unique() ->test1
+
+# how many mothers and children
+seqtab_annotated %>% 
+  filter(total_reads>200) %>% 
+  select( sample_single, sample_type) %>% unique() %>% select(sample_type) %>% 
+  table()
+
+
+both_norep %>% 
+  select(samples_merged, seq_id, sample_single, merged_freq, sample_type) %>% 
+  group_by(samples_merged) %>% 
+  mutate(num_haps = n()) %>% 
+  mutate(more_than_2 = ifelse(num_haps>2, TRUE,FALSE)) %>% 
+  na.omit() %>% 
+  ungroup() %>% group_by(sample_single) %>% 
+  mutate(MID = str_extract(samples_merged, "(?<=MID_)[:digit:]")) %>% 
+  #select(sample_single, more_than_2, sample_type) %>% unique() %>% view()
+  select( sample_single, sample_type, more_than_2) %>% ungroup() %>%  unique() %>% filter(more_than_2 =="FALSE") %>% select(sample_type) %>% table()
+
+union(test1$sample_single, test2$sample_single)
+test2$sample_single
+```
+
+
+
+#upset plot
+figure 1c
+
+```{r}
+
+## haps appear in both
+C0 = both_samples %>%  filter(seq_id == "Haplotype_0")
+C1 =both_samples %>% filter(seq_id == "Haplotype_1")
+C2 =both_samples%>%  filter(seq_id == "Haplotype_2")
+C3 =both_samples%>%  filter(seq_id == "Haplotype_3")
+C4 =both_samples%>%  filter(seq_id == "Haplotype_4")
+C5 =both_samples%>% filter(seq_id == "Haplotype_5")
+C6 =both_samples%>%  filter(seq_id == "Haplotype_6")
+C7 =both_samples%>%  filter(seq_id == "Haplotype_7")
+C8 =both_samples%>%  filter(seq_id == "Haplotype_8")
+C9 =both_samples%>%  filter(seq_id == "Haplotype_9")
+C10 =both_samples%>%  filter(seq_id == "Haplotype_10")
+C11=both_samples%>%  filter(seq_id == "Haplotype_11")
+#C12=both_samples%>%  filter(seq_id == "Haplotype_12")
+
+upset_list = list(Haplotype_0 =C0$sample_single %>% unique(),
+                  Haplotype_1 = C1$sample_single %>% unique(),
+                  Haplotype_2 = C2$sample_single %>% unique(),
+                  Haplotype_3 = C3$sample_single %>% unique(),
+                  Haplotype_4 = C4$sample_single %>% unique(),
+                  Haplotype_5 = C5$sample_single %>% unique(),
+                  Haplotype_6 = C6$sample_single %>% unique(),
+                  Haplotype_7 = C7$sample_single %>% unique(),
+                  Haplotype_8 = C8$sample_single %>% unique(),
+                  Haplotype_9 = C9$sample_single %>% unique(),
+                  Haplotype_10 = C10$sample_single %>% unique(),
+                  Haplotype_11 = C11$sample_single %>% unique()
+                  )
+
+#make group that have each set to make a colored bar
+
+
+pdf("../Amplicon_analysis/Figures/Upset_bothsamples.pdf", height = 5.5, width = 5)
+upset(fromList(upset_list),
+              order.by = "freq",
+              nsets = length(upset_list),
+              sets.bar.color = c(
+                  `Haplotype_0` = "#7BCEC8", 
+                  `Haplotype_6` = "#C5B0D5",
+                  `Haplotype_7` = "#C49C94", 
+                  `Haplotype_1` = "#FF9896", 
+                  `Haplotype_4` = "#5DA069",
+                  `Haplotype_9` ="#FFB14D",
+                  `Haplotype_5` = "#6291EA",
+                  #`Haplotype_12` = "#FFDC73",
+                  `Haplotype_3` = "#17BECF",
+                  `Haplotype_8` = "#D46A97", 
+                  `Haplotype_2` ="#B4E877", 
+                  `Haplotype_11` = "#6B6ECF",
+                  `Haplotype_10` = "#DE9ED6"
+                  ))
+dev.off()
+
+## haps appear in both OR there's only one rep
+C0 = both_norep %>%  filter(seq_id == "Haplotype_0")
+C1 =both_norep %>% filter(seq_id == "Haplotype_1")
+C2 =both_norep%>%  filter(seq_id == "Haplotype_2")
+C3 =both_norep%>%  filter(seq_id == "Haplotype_3")
+C4 =both_norep%>%  filter(seq_id == "Haplotype_4")
+C5 =both_norep%>% filter(seq_id == "Haplotype_5")
+C6 =both_norep%>%  filter(seq_id == "Haplotype_6")
+C7 =both_norep%>%  filter(seq_id == "Haplotype_7")
+C8 =both_norep%>%  filter(seq_id == "Haplotype_8")
+C9 =both_norep%>%  filter(seq_id == "Haplotype_9")
+C10 =both_norep%>%  filter(seq_id == "Haplotype_10")
+C11=both_norep%>%  filter(seq_id == "Haplotype_11")
+C12=both_norep%>%  filter(seq_id == "Haplotype_12")
+
+upset_list = list(Haplotype_0 =C0$sample_single %>% unique(),
+                  Haplotype_1 = C1$sample_single %>% unique(),
+                  Haplotype_2 = C2$sample_single %>% unique(),
+                  Haplotype_3 = C3$sample_single %>% unique(),
+                  Haplotype_4 = C4$sample_single %>% unique(),
+                  Haplotype_5 = C5$sample_single %>% unique(),
+                  Haplotype_6 = C6$sample_single %>% unique(),
+                  Haplotype_7 = C7$sample_single %>% unique(),
+                  Haplotype_8 = C8$sample_single %>% unique(),
+                  #Haplotype_12 = C12$sample_single %>% unique(),
+                  Haplotype_9 = C9$sample_single %>% unique(),
+                  #Haplotype_10 = C10$sample_single %>% unique(),
+                  Haplotype_11 = C11$sample_single %>% unique()
+                  )
+
+#make group that have each set to make a colored bar
+
+
+pdf("../Amplicon_analysis/Figures/Upset_bothsamples_norep.pdf", height = 5.5, width = 5)
+upset(fromList(upset_list),
+              order.by = "freq",
+              nsets = length(upset_list),
+              sets.bar.color = c(
+                  `Haplotype_0` = "#7BCEC8",
+                  `Haplotype_7` = "#C49C94",
+                  `Haplotype_4` = "#5DA069",
+                  `Haplotype_1` = "#FF9896",
+                  `Haplotype_9` ="#FFB14D",
+                  `Haplotype_5` = "#6291EA",
+                  `Haplotype_6` = "#C5B0D5",
+                  `Haplotype_3` = "#17BECF",
+                  `Haplotype_2` ="#B4E877",
+                  #`Haplotype_12` = "#FFDC73",
+                  #`Haplotype_10` = "#DE9ED6",
+                  `Haplotype_11` = "#6B6ECF",
+                  `Haplotype_8` = "#D46A97"
+                  ))
+dev.off()
+
+## haps appear in either
+C0 = seqtab_annotated %>%  filter(seq_id == "Haplotype_0")
+C1 =seqtab_annotated %>% filter(seq_id == "Haplotype_1")
+C2 =seqtab_annotated%>%  filter(seq_id == "Haplotype_2")
+C3 =seqtab_annotated%>%  filter(seq_id == "Haplotype_3")
+C4 =seqtab_annotated%>%  filter(seq_id == "Haplotype_4")
+C5 =seqtab_annotated%>% filter(seq_id == "Haplotype_5")
+C6 =seqtab_annotated%>%  filter(seq_id == "Haplotype_6")
+C7 =seqtab_annotated%>%  filter(seq_id == "Haplotype_7")
+C8 =seqtab_annotated%>%  filter(seq_id == "Haplotype_8")
+C9 =seqtab_annotated%>%  filter(seq_id == "Haplotype_9")
+C10 =seqtab_annotated%>%  filter(seq_id == "Haplotype_10")
+C11=seqtab_annotated%>%  filter(seq_id == "Haplotype_11")
+C12=seqtab_annotated%>%  filter(seq_id == "Haplotype_12")
+
+
+upset_list = list(Haplotype_0 =C0$sample_single %>% unique(),
+                  Haplotype_1 = C1$sample_single %>% unique(),
+                  Haplotype_2 = C2$sample_single %>% unique(),
+                  Haplotype_3 = C3$sample_single %>% unique(),
+                  Haplotype_4 = C4$sample_single %>% unique(),
+                  Haplotype_5 = C5$sample_single %>% unique(),
+                  Haplotype_6 = C6$sample_single %>% unique(),
+                  Haplotype_7 = C7$sample_single %>% unique(),
+                  Haplotype_8 = C8$sample_single %>% unique(),
+                  Haplotype_9 = C9$sample_single %>% unique(),
+                  Haplotype_10 = C10$sample_single %>% unique(),
+                  #Haplotype_12 = C12$sample_single %>% unique(),
+                  Haplotype_11 = C11$sample_single %>% unique()
+                  )
+
+pdf("../Amplicon_analysis/Figures/Upset_eithersamples.pdf", height = 5.5, width = 5)
+upset(fromList(upset_list),
+              order.by = "freq",
+              nsets = length(upset_list),
+              sets.bar.color = c(
+                  `Haplotype_0` = "#7BCEC8", 
+                  `Haplotype_6` = "#C5B0D5",
+                  `Haplotype_7` = "#C49C94", 
+                  `Haplotype_1` = "#FF9896", 
+                  `Haplotype_4` = "#5DA069",
+                  `Haplotype_9` ="#FFB14D",
+                  `Haplotype_5` = "#6291EA",
+                  `Haplotype_12` = "#FFDC73",
+                  `Haplotype_3` = "#17BECF",
+                  `Haplotype_8` = "#D46A97", 
+                  `Haplotype_2` ="#B4E877", 
+                  `Haplotype_11` = "#6B6ECF",
+                  `Haplotype_10` = "#DE9ED6"
+                  ))
+dev.off()
+
+```
+
+
+
+# Mom vs baby sample at birth -NOMRMALIZED TO GROUP SIZE
+
+figures 3a and 3b
+
+How many times a halpotype appeared in a baby sample only/total number of baby samples, number of times it appeared in a mom sample only/total number of mom samples, and number of times it appeared in a baby and a mom sample/total number of samples
+```{r}
+fisher_results = data.frame(Cluster = character(),
+                            pvalue = numeric(),
+                            OR = numeric(),
+                            num_birth = numeric(), num_mom = numeric(), num_both = numeric(), num_none = numeric())
+
+Cluster = "Haplotype_0"
+haplotype_list = c("Haplotype_0", "Haplotype_1",
+                   #"Haplotype_2", 
+                   "Haplotype_3","Haplotype_4", "Haplotype_5", "Haplotype_6", "Haplotype_7", "Haplotype_8", "Haplotype_9",
+                   #"Haplotype_10",
+                   "Haplotype_12")
+
+total_baby = both_samples %>% filter(sample_type == "0m") %>% select(family) %>% unique()  %>% nrow 
+total_mom = both_samples %>% filter(sample_type == "mother") %>% select(family) %>% unique()  %>% nrow 
+total_samp = total_baby +total_mom
+
+for (Cluster in haplotype_list %>% unique() ) {
+  
+ contigency_table = both_samples %>% 
+  filter(total_reads >100) %>% 
+  #select(-seq, -seq_id, -freq, -mother) %>% unique %>% 
+  filter(sample_type %in% c("mother", "0m")) %>% 
+  pivot_wider(id_cols = c("sample_single","family" , "sample_type"),
+              names_from = seq_id,
+              values_from = merged_freq,
+              values_fn = sum) %>% 
+  mutate_all(~replace(., is.na(.), 0)) %>% ####!! Need to expand out the matrix to include 0s for clusters not expressed
+  pivot_longer(cols =haplotype_list, names_to = "seq_id", values_to = "freq") %>% 
+  pivot_wider(id_cols = c(seq_id, family), names_from = sample_type, values_from = freq, values_fn = sum ) %>% 
+  na_if(0)%>% 
+  filter(seq_id == Cluster) %>% 
+        mutate(samp_birth = ifelse( !is.na(.[3]), 1,0),
+           samp_mom = ifelse(!is.na(.[4]), 1, 0),
+           samp_both = ifelse(samp_birth == 1 & samp_mom == 1, 1, 0),
+           samp_none = ifelse(samp_birth == 0 & samp_mom ==0, 1, 0)) %>% 
+      mutate(num_birth = sum(samp_birth),
+           num_mom = sum(samp_mom),
+           num_both = sum(samp_both),
+           num_none = sum(samp_none)) %>% select(num_birth, num_mom, num_both, num_none) %>% unique
+  
+  contingency_2b2 <- matrix(c(contigency_table$num_both,
+                              contigency_table$num_birth,
+                              contigency_table$num_mom,
+                              contigency_table$num_none),nrow=2,ncol=2,dimnames=list(c("mom","noMom"), c("Birth","noBirth")))
+  
+    ftest = fisher.test(contingency_2b2,alternative = "less")
+    
+    fisher_results  %>% add_row("Cluster" = Cluster,
+                              "pvalue" = ftest$p.value,
+                              "OR" = ftest$estimate,
+                              "num_birth"= contigency_table$num_birth/total_baby, 
+                              "num_mom"= contigency_table$num_mom/total_mom, 
+                              "num_both" = contigency_table$num_both/total_samp, 
+                              "num_none" =contigency_table$num_none) -> fisher_results
+}
+
+
+fisher_results = fisher_results %>% 
+  mutate(p_adjust = p.adjust(pvalue, method = "BH"))
+
+
+fisher_results %>%
+  mutate(BirthvsMom = num_birth-num_mom) %>% 
+  ggplot() +
+  geom_hline(yintercept = 0)+
+  geom_bar(aes(y = BirthvsMom, x = Cluster, fill = Cluster), stat = "identity")+
+  scale_fill_brewer(palette="Set3")+
+  #scale_fill_manual(values = group.colors)+
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+fisher_results %>%
+  ggplot() +
+  geom_point(aes(y = num_both, x = Cluster), color ="#7C4A8A", size = 4)+
+  scale_fill_brewer(palette="Set3")+
+  #scale_fill_manual(values = group.colors)+
+  geom_point(aes(y = num_mom, x = Cluster), color = "#E25D8D", size = 4, shape = 15)+
+  geom_point(aes(y = num_birth, x = Cluster), color ="#27A4C3", size = 4, shape = 17)+
+  theme_bw()+
+  theme(legend.position = "bottom",  axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ 
+  ylab("Number of Samples, normalized to sample pool")+xlab("Haplotypes")
+
+fisher_results %>%
+  pivot_longer(cols = c("num_birth", "num_mom", "num_both"), names_to = "MomOrBaby", values_to = "sample_num") %>% 
+  mutate(Samples_found = case_when(MomOrBaby =="num_birth"~"0m", 
+                                   MomOrBaby =="num_mom" ~ "mother",
+                                   TRUE~"both")) %>% 
+  filter(Samples_found != "both") %>% 
+  ggplot() +
+  geom_col(aes(fill  = Samples_found, y = sample_num, x = Cluster), position = "dodge", width = .5, color = "black")+
+  scale_fill_manual(values = sample.colors)+
+  theme(legend.position = "top",  axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ylab("Proportion of Samples with Haplotypes")+xlab("Haplotypes") +
+  theme(  axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+fisher_results %>%
+  pivot_longer(cols = c("num_birth", "num_mom", "num_both"), names_to = "MomOrBaby", values_to = "sample_num") %>% 
+  mutate(Samples_found = case_when(MomOrBaby =="num_birth"~"0m", 
+                                   MomOrBaby =="num_mom" ~ "mother",
+                                   TRUE~"both")) %>% 
+  filter(Samples_found != "both") %>% 
+  mutate(Cluster = ordered(Cluster, 
+                           levels = c("Haplotype_4", "Haplotype_9", "Haplotype_1","Haplotype_12","Haplotype_11", "Haplotype_5", "Haplotype_10","Haplotype_6", "Haplotype_0", "Haplotype_3", "Haplotype_8", "Haplotype_7","Haplotype_2"))) %>% 
+  ggplot() +
+  geom_col(aes(fill  = Samples_found, x = sample_num, y = Cluster), position = "dodge", width = .5, color = "black")+
+  scale_fill_manual(values = sample.colors)+
+  xlab("Proportion of Samples with Haplotypes")+ylab("Haplotypes") 
+
+
+```
+
+

@@ -1,0 +1,146 @@
+---
+title: "Dada2_spikein_fw"
+output: html_document
+---
+```{r}
+
+library(tidyverse)
+library(ggplot2); theme_set(theme_bw())
+library(dada2)
+```
+
+
+Datastep
+```{r}
+path = "../raw_and_processed_fastq/fastq_processed/primer_trimmed/FW"
+#list.files(path)
+
+# Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+fnFs <- sort(list.files(path, pattern="R1_primertrim.fastq.gz", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="R2_primertrim.fastq.gz", full.names = TRUE))
+
+
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), "_R1_primertrim.fastq"), `[`, 1)
+
+
+```
+
+
+Quality check
+```{r}
+pdf("../dada2/Diagnostic_graphs/Quality_fw_R1_head.pdf", height = 10, width = 10)
+plotQualityProfile(fnFs[1:12])
+dev.off()
+
+pdf("../dada2/Diagnostic_graphs/Quality_fw_R2_head.pdf", height = 10, width = 10)
+plotQualityProfile(fnRs[1:12])
+dev.off()
+```
+
+
+Filter and trim
+```{r}
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs,
+                     #truncLen=c(290,280),
+                     matchIDs=TRUE, 
+                     maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+                     compress=TRUE, multithread=F) # On Windows set multithread=FALSE
+head(out)
+
+
+```
+
+Error models
+```{r}
+#update the a list of files that made it through filtering
+#update the list of filtFs to accomodate the possibility that whole samples got thrown out at the filtering stage
+filtFs <- file.path(path, "filtered", list.files(path = paste0(path, "/filtered"), pattern = "F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", list.files(path = paste0(path, "/filtered"), pattern = "R_filt.fastq.gz"))
+
+sample.names_new <- sapply(strsplit(basename(filtFs), "_F_filt.fastq.gz"), `[`, 1)
+
+names(filtFs) <- sample.names_new
+names(filtRs) <- sample.names_new
+
+#now learn errors
+errF <- learnErrors(filtFs, multithread=F)
+errR <- learnErrors(filtRs, multithread=F)
+
+saveRDS(errF, file = "errF_fw.rds")
+saveRDS(errR, file = "errR_fw.rds")
+```
+
+```{r}
+pdf("../dada2/Diagnostic_graphs/errorsR1_Fw.pdf", height = 10, width = 10)
+plotErrors(errF, nominalQ=TRUE)
+dev.off()
+
+pdf("../dada2/Diagnostic_graphs/errorsR2_FW.pdf", height = 10, width = 10)
+plotErrors(errR, nominalQ=TRUE)
+dev.off()
+
+
+```
+
+Dereplicate
+```{r}
+derepF <- derepFastq(filtFs, verbose=TRUE)
+derepR <- derepFastq(filtRs, verbose=TRUE)
+
+```
+
+
+Sample inference
+```{r}
+dadaFs <- dada(derepF, err=errF, multithread=F)
+dadaRs <- dada(derepR, err=errR, multithread=F)
+
+dadaFs[[1]]
+```
+Merge reads
+```{r}
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers[[1]])
+``` 
+
+
+
+
+Construct sequence table
+```{r}
+seqtab <- makeSequenceTable(mergers)
+
+dim(seqtab)
+
+write.csv(seqtab, "../dada2/out/seqtab_fw.csv")
+
+```
+Remove chimeras
+```{r}
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+
+write.csv(seqtab.nochim, "../dada2/out/seqtab_nochim_fw.csv")
+
+
+```
+Track reads through pipeline
+```{r}
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+track
+write.csv(track, "../dada2/out/tracked_reads_fw.csv")
+```
+
+
